@@ -1,0 +1,169 @@
+name: Build OpenWrt Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      router_model:
+        description: 'Router Model (Supported QCN5502 Models)'
+        required: true
+        type: choice
+        default: 'TP-Link Archer A9 v6'
+        options:
+          - 'TP-Link Archer A9 v6'
+          - 'ASUS RT-AC59U v2'
+          - 'ASUS RT-AC59U'
+          - 'ASUS ZenWiFi CD6N'
+          - 'ASUS ZenWiFi CD6R'
+          - 'NETGEAR EX7300 v2'
+      runner:
+        description: 'Build Runner'
+        required: true
+        type: choice
+        default: 'GitHub Runner'
+        options:
+          - 'GitHub Runner'
+          - 'Self-Hosted'
+      packages:
+        description: 'Packages to include in firmware (space- or comma-separated)'
+        required: false
+        type: string
+        default: 'luci luci-app-firewall kmod-usb2'
+      create_release:
+        description: 'Create a GitHub Release with firmware binaries and release notes'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.router_model }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Firmware for ${{ inputs.router_model }} (${{ inputs.runner }})
+    runs-on: ${{ inputs.runner == 'Self-Hosted' && 'self-hosted' || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Maximize Runner Space
+        if: ${{ inputs.runner != 'Self-Hosted' }}
+        uses: justinthelaw/maximize-github-runner-space@v0.12.2
+        continue-on-error: true
+        with:
+          swapfile-size: 4GiB
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ccache clang flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3-setuptools rsync swig unzip \
+            zlib1g-dev file wget libelf-dev zstd time
+
+      - name: Verify QCN5502 Patch Integrity
+        run: |
+          python3 -c "
+          import sys, os
+          dts = 'target/linux/ath79/dts/qcn5502_tplink_archer-a9-v6.dts'
+          if not os.path.exists(dts):
+              print('ERROR: DTS file missing:', dts, file=sys.stderr)
+              sys.exit(1)
+          with open(dts) as f:
+              c = f.read()
+          if 'compatible = \"qca,qcn5502-wifi\"' not in c or 'status = \"okay\"' not in c:
+              print('ERROR: QCN5502 patch not active in', dts, file=sys.stderr)
+              sys.exit(1)
+          print('Verified: QCN5502 2.4GHz wireless support patch is active.')
+          "
+
+      - name: Resolve Router Model
+        id: resolve
+        env:
+          ROUTER_MODEL: ${{ inputs.router_model }}
+        run: |
+          python3 .github/scripts/resolve_router.py \
+            --query "$ROUTER_MODEL" \
+            --repo-dir . \
+            --export-github-env \
+            --export-github-output
+
+      - name: Update & Install Feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure Firmware & Validate Packages
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          python3 .github/scripts/configure_build.py \
+            --target "$TARGET" \
+            --subtarget "$SUBTARGET" \
+            --profile "$PROFILE" \
+            --packages "$PACKAGES" \
+            --run-defconfig
+
+      - name: Download Source Tarballs
+        run: |
+          make download -j$(nproc)
+          find dl -size 0 -exec rm -f {} +
+
+      - name: Compile Firmware
+        run: |
+          echo "Compiling firmware for $DEVICE_NAME ($TARGET/$SUBTARGET/$PROFILE)..."
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Package Artifacts & Generate Release Notes
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          python3 .github/scripts/package_artifacts.py \
+            --target "$TARGET" \
+            --subtarget "$SUBTARGET" \
+            --profile "$PROFILE" \
+            --device-name "$DEVICE_NAME" \
+            --router-slug "$ROUTER_SLUG" \
+            --packages "$PACKAGES" \
+            --out-dir artifact \
+            --notes-file release_notes.md
+
+      - name: Upload Workflow Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ env.ROUTER_SLUG }}-${{ env.BUILD_DATE }}
+          path: artifact/
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: ${{ inputs.create_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TITLE }}
+          body_path: release_notes.md
+          files: |
+            artifact/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup Workspace (Self-Hosted Only)
+        if: ${{ always() && inputs.runner == 'Self-Hosted' }}
+        run: |
+          echo "Cleaning up build directories on self-hosted runner..."
+          rm -rf build_dir staging_dir bin tmp artifact release_notes.md
+          echo "Cleanup complete. dl/ cache preserved for subsequent builds."

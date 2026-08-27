@@ -11,17 +11,46 @@ full customization, to use the device in ways never envisioned.
 
 Sunshine!
 
+## QCN5502 Fork Features (2.4 GHz Wi-Fi Support)
+
+This repository is an OpenWrt fork with experimental support for the **Qualcomm QCN5502** SoC (`ath9k`), enabling fully functional **2.4 GHz wireless** alongside the 5 GHz radio (`ath10k`).
+
+### Supported QCN5502 Devices:
+- **TP-Link Archer A9 v6** (`ath79/generic/tplink_archer-a9-v6`)
+- **ASUS RT-AC59U v2** (`ath79/generic/asus_rt-ac59u-v2`) — *also covers RT-AC1300G PLUS v3, RT-AC57U v3, RT-AC58U v3*
+- **ASUS RT-AC59U** (`ath79/generic/asus_rt-ac59u`) — *also covers RT-AC1200GE, RT-AC1500G PLUS, RT-AC1500UHP, RT-AC57U v2, RT-AC58U v2, RT-ACRH12*
+- **ASUS ZenWiFi AC Mini (CD6)** (`ath79/generic/asus_zenwifi-cd6n` & `asus_zenwifi-cd6r`)
+- **NETGEAR EX7300 v2** (`ath79/generic/netgear_ex7300-v2`) — *also covers EX6250, EX6400 v2, EX6410, EX6420, EX7320*
+
+---
+
+## Automated Firmware Building (GitHub Actions)
+
+You can build custom firmware directly on GitHub without setting up a local Linux build environment.
+
+### How to Build Firmware:
+1. Navigate to the **Actions** tab in this GitHub repository.
+2. Select the **Build OpenWrt Firmware** workflow in the left sidebar.
+3. Click **Run workflow** on the right side.
+4. Configure the inputs:
+   - **Router Model**: Choose your router from the dropdown (e.g. `TP-Link Archer A9 v6`), or select `Custom (specify in custom_router_model)`.
+   - **Custom Router Model**: *(Optional)* Enter any other router model supported by OpenWrt (e.g. `GL-MT3000`, `x86/64`, `ath79/generic/tplink_archer-c7-v5`).
+   - **Packages**: Enter any custom packages to include, separated by spaces or newlines:
+     ```text
+     luci
+     luci-app-firewall
+     kmod-usb2
+     ```
+   - **Create Release**: Keep checked to automatically publish a GitHub Release with attached firmware binaries, SHA256 checksums, and release notes.
+5. Click **Run workflow**.
+
+### Downloading Firmware:
+- **GitHub Releases**: If *Create Release* is enabled, visit the repository's **Releases** page to download the factory and sysupgrade images along with SHA256 checksums.
+- **Workflow Run Artifacts**: Download the `openwrt-<router>-<date>` ZIP bundle directly from the completed workflow run summary page.
+
+---
+
 ## Download
-
-Built firmware images are available for many architectures and come with a
-package selection to be used as WiFi home router. To quickly find a factory
-image usable to migrate from a vendor stock firmware to OpenWrt, try the
-*Firmware Selector*.
-
-* [OpenWrt Firmware Selector](https://firmware-selector.openwrt.org/)
-
-If your device is supported, please follow the **Info** link to see install
-instructions or consult the support resources listed below.
 
 ##
 
